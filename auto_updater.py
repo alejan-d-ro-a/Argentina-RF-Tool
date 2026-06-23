@@ -10,9 +10,9 @@ from tkinter import messagebox
 # =================================================================
 # CONFIGURACIÓN DEL UPDATER
 # =================================================================
-CURRENT_VERSION = "v1.0.0" 
+CURRENT_VERSION = "v1.0.3" 
 GITHUB_REPO = "alejan-d-ro-a/Argentina-RF-Tool"
-EXE_NAME = "Argentina RF Tool.exe" 
+EXE_NAME = "Argentina.RF.Tool.exe" 
 
 def check_for_updates():
     """

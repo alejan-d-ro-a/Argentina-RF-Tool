@@ -4,12 +4,40 @@ import calendar
 import tkinter as tk
 from datetime import date
 
+# =========================================================================
+# FUNCIONES AUXILIARES
+# =========================================================================
+
 def set_appwindow(root):
     if sys.platform == "win32":
         try:
             import ctypes
             hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
             if not hwnd: hwnd = root.winfo_id()
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            WS_EX_TOOLWINDOW = 0x00000080
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style = style & ~WS_EX_TOOLWINDOW
+            style = style | WS_EX_APPWINDOW
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            icon_path = str(resource_path("argentina.ico"))
+            if os.path.exists(icon_path):
+                WM_SETICON = 0x0080
+                IMAGE_ICON = 1
+                LR_LOADFROMFILE = 0x0010
+                hicon = ctypes.windll.user32.LoadImageW(0, icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
+                if hicon:
+                    ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 1, hicon)
+                    ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 0, hicon)
+        except: pass
+
+def set_toplevel_appwindow(toplevel):
+    """Hace que un Toplevel (pop-up) aparezca en la barra de tareas."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            hwnd = toplevel.winfo_id()
             GWL_EXSTYLE = -20
             WS_EX_APPWINDOW = 0x00040000
             WS_EX_TOOLWINDOW = 0x00000080
@@ -40,7 +68,6 @@ def apply_rounded_corners(window, radius):
             if not hwnd: hwnd = window.winfo_id()
             w = window.winfo_width()
             h = window.winfo_height()
-            # Validar que la ventana ya tenga dimensiones reales para evitar recortes fallidos
             if w > 1 and h > 1:
                 rgn = ctypes.windll.gdi32.CreateRoundRectRgn(0, 0, w, h, radius, radius)
                 ctypes.windll.user32.SetWindowRgn(hwnd, rgn, True)
@@ -68,7 +95,7 @@ def to_hex(c):
     return "#808080"
 
 # =========================================================================
-# VISUAL CONFIGURATION
+# CONFIGURACIÓN VISUAL
 # =========================================================================
 COLOR_BG = "#F0F8FF"
 COLOR_FRAME = "#E6F2FF"
@@ -88,18 +115,22 @@ FONT_HUGE = ("Comic Sans MS", 12, "bold")
 FONT_DYNAMIC = ("Comic Sans MS", 16, "bold")
 
 # =========================================================================
-# DATE PICKER COMPONENT (NATIVE & BORDERLESS)
+# DATE PICKER (ventana estándar)
 # =========================================================================
 class DatePickerDialog(tk.Toplevel):
     def __init__(self, parent, sf):
         super().__init__(parent)
+        self.parent = parent
         self.sf = sf
         self.result = None
         
-        self.withdraw()
-        self.overrideredirect(True)
+        self.title("Select Date")
         self.configure(bg=COLOR_BG)
         self.transient(parent)
+        try:
+            self.iconbitmap(resource_path("argentina.ico"))
+        except:
+            pass
         
         self.current_date = date.today()
         self.year = self.current_date.year
@@ -120,38 +151,39 @@ class DatePickerDialog(tk.Toplevel):
         y = py + (ph - req_h) // 2
         
         self.geometry(f"{req_w}x{req_h}+{x}+{y}")
-        self.attributes("-topmost", True)
+        self.resizable(False, False)
+        self.update_idletasks()
+        apply_rounded_corners(self, int(15 * self.sf))
         
-        # Anclar la aplicación de bordes al evento Configure (cambio de tamaño/posición)
-        self.bind("<Configure>", self._on_configure)
+        # Hacer que aparezca en la barra de tareas
+        set_toplevel_appwindow(self)
         
-        self.deiconify()
+        # Vincular eventos de la ventana padre para traer este diálogo al frente
+        parent.bind("<FocusIn>", self._on_parent_focus, add="+")
+        parent.bind("<ButtonPress-1>", self._on_parent_click, add="+")
+        
         self.focus_force()
-        self.update()
         self.grab_set()
         parent.wait_window(self)
 
-    def _on_configure(self, event):
-        if str(event.widget) == str(self):
-            apply_rounded_corners(self, int(15 * self.sf))
+    def _bring_to_front(self):
+        if self.winfo_exists():
+            self.lift()
+            self.attributes('-topmost', True)
+            self.update_idletasks()
+            self.attributes('-topmost', False)
+            self.focus_force()
+
+    def _on_parent_focus(self, event):
+        if self.winfo_exists():
+            self.after(10, self._bring_to_front)
+
+    def _on_parent_click(self, event):
+        if self.winfo_exists():
+            self.after(10, self._bring_to_front)
 
     def setup_ui(self):
-        self.title_bar = tk.Frame(self, bg=COLOR_BTN_DARK, relief="raised", bd=0, height=int(32 * self.sf))
-        self.title_bar.pack(expand=0, fill="x")
-        self.title_bar.pack_propagate(False)
-        self.title_bar.bind("<ButtonPress-1>", self.start_move)
-        self.title_bar.bind("<B1-Motion>", self.do_move)
-        
-        self.lbl_title = tk.Label(self.title_bar, text="Select Date", bg=COLOR_BTN_DARK, fg="white", font=FONT_TITLE)
-        self.lbl_title.place(relx=0.5, rely=0.5, anchor="center")
-        self.lbl_title.bind("<ButtonPress-1>", self.start_move)
-        self.lbl_title.bind("<B1-Motion>", self.do_move)
-        
-        self.close_btn = tk.Button(self.title_bar, text="✕", bg=COLOR_BTN_DARK, fg="white", bd=0, command=self.destroy, font=FONT_TITLE, width=4, activebackground="#A00000", activeforeground="white", cursor="hand2")
-        self.close_btn.pack(side="right", fill="y")
-        self.close_btn.bind("<Enter>", lambda e: self.close_btn.config(bg="#D00000"))
-        self.close_btn.bind("<Leave>", lambda e: self.close_btn.config(bg=COLOR_BTN_DARK))
-
+        # Barra de título nativa, sin personalizar
         header = tk.Frame(self, bg=COLOR_BG)
         header.pack(fill="x", pady=10)
         tk.Button(header, text="<", command=self.prev_month, bg=COLOR_BTN, fg="white", font=FONT_NORMAL, width=3, relief="flat", cursor="hand2").pack(side="left", padx=10)
@@ -162,14 +194,6 @@ class DatePickerDialog(tk.Toplevel):
         self.cal_frame = tk.Frame(self, bg="white")
         self.cal_frame.pack(expand=True, fill="both", padx=15, pady=(0, 15))
         self.update_calendar()
-
-    def start_move(self, event):
-        self.x, self.y = event.x, event.y
-
-    def do_move(self, event):
-        x = self.winfo_x() + (event.x - self.x)
-        y = self.winfo_y() + (event.y - self.y)
-        self.geometry(f"+{x}+{y}")
 
     def prev_month(self):
         self.month -= 1
@@ -214,7 +238,7 @@ class DatePickerDialog(tk.Toplevel):
         self.lbl_month_year.config(text=f"{month_name} {self.year}")
 
 # =========================================================================
-# TOOLTIP COMPONENT
+# TOOLTIP
 # =========================================================================
 class ToolTip(object):
     def __init__(self, widget, text='widget info', sf=1.0):
@@ -243,7 +267,6 @@ class ToolTip(object):
         y += self.widget.winfo_rooty() + 20
         self.tw = tk.Toplevel(self.widget)
         self.tw.wm_overrideredirect(True)
-        self.tw.attributes("-topmost", True)
         self.tw.wm_geometry("+%d+%d" % (x, y))
         
         self.tw.bind("<Configure>", self._on_configure)
@@ -287,7 +310,7 @@ class TextAnimWrapper:
             pass
 
 # =========================================================================
-# CUSTOM COMPONENTS
+# BOTÓN REDONDEADO
 # =========================================================================
 class RoundedButton(tk.Canvas):
     def __init__(self, parent, text, command, width=400, height=45, radius=20, bg=COLOR_BTN,
@@ -431,6 +454,9 @@ class RoundedButton(tk.Canvas):
         self.update_colors()
         self.animate_transition(self.current_bg, self.current_fg, self.pad_normal)
 
+# =========================================================================
+# BARRA DE PROGRESO
+# =========================================================================
 class RoundedProgressBar(tk.Canvas):
     def __init__(self, parent, width=800, height=35, bg_color="#E0E0E0", fill_color=COLOR_BTN, sf=1.0):
         self.width = int(width * sf)
@@ -475,6 +501,9 @@ class RoundedProgressBar(tk.Canvas):
         self.draw_bar()
         self.after(20, self.animate)
 
+# =========================================================================
+# CUSTOM MESSAGE BOX (ventana estándar)
+# =========================================================================
 class CustomMessageBox:
     def __init__(self, parent, title, message, msg_type="info", sf=1.0):
         self.parent = parent
@@ -485,25 +514,13 @@ class CustomMessageBox:
         self.result = False
         
         self.top = tk.Toplevel(parent)
-        self.top.withdraw()
-        self.top.overrideredirect(True)
+        self.top.title(title)
         self.top.configure(bg=COLOR_BG)
-        
-        self.title_bar = tk.Frame(self.top, bg=COLOR_BTN_DARK, relief="raised", bd=0, height=int(32 * self.sf))
-        self.title_bar.pack(expand=0, fill="x")
-        self.title_bar.pack_propagate(False)
-        self.title_bar.bind("<ButtonPress-1>", self.start_move)
-        self.title_bar.bind("<B1-Motion>", self.do_move)
-        
-        self.lbl_title = tk.Label(self.title_bar, text=self.title, bg=COLOR_BTN_DARK, fg="white", font=FONT_TITLE)
-        self.lbl_title.place(relx=0.5, rely=0.5, anchor="center")
-        self.lbl_title.bind("<ButtonPress-1>", self.start_move)
-        self.lbl_title.bind("<B1-Motion>", self.do_move)
-        
-        self.close_btn = tk.Button(self.title_bar, text="✕", bg=COLOR_BTN_DARK, fg="white", bd=0, command=self.close_no, font=FONT_TITLE, width=4, activebackground="#A00000", activeforeground="white", cursor="hand2")
-        self.close_btn.pack(side="right", fill="y")
-        self.close_btn.bind("<Enter>", lambda e: self.close_btn.config(bg="#D00000"))
-        self.close_btn.bind("<Leave>", lambda e: self.close_btn.config(bg=COLOR_BTN_DARK))
+        self.top.transient(parent)
+        try:
+            self.top.iconbitmap(resource_path("argentina.ico"))
+        except:
+            pass
         
         f_msg = tk.Frame(self.top, bg=COLOR_BG)
         f_msg.pack(expand=True, fill="both", padx=int(20 * self.sf), pady=int(15 * self.sf))
@@ -544,28 +561,36 @@ class CustomMessageBox:
         y = py + (ph - req_h) // 2
         
         self.top.geometry(f"{req_w}x{req_h}+{x}+{y}")
-        self.top.attributes("-topmost", True)
+        self.top.resizable(False, False)
+        self.top.update_idletasks()
+        apply_rounded_corners(self.top, int(20 * self.sf))
         
-        # Vincular el evento Configure para asegurar bordes en cada ajuste de Windows
-        self.top.bind("<Configure>", self._on_configure)
+        set_toplevel_appwindow(self.top)
         
-        self.top.deiconify()
+        # Vincular eventos de la ventana padre
+        parent.bind("<FocusIn>", self._on_parent_focus, add="+")
+        parent.bind("<ButtonPress-1>", self._on_parent_click, add="+")
+        
         self.top.focus_force()
-        self.top.lift()
-        self.top.update()
         self.top.grab_set()
         parent.wait_window(self.top)
 
-    def _on_configure(self, event):
-        if str(event.widget) == str(self.top):
-            apply_rounded_corners(self.top, int(20 * self.sf))
+    def _bring_to_front(self):
+        if self.top.winfo_exists():
+            self.top.lift()
+            self.top.attributes('-topmost', True)
+            self.top.update_idletasks()
+            self.top.attributes('-topmost', False)
+            self.top.focus_force()
 
-    def start_move(self, event):
-        self.x, self.y = event.x, event.y
-    def do_move(self, event):
-        x = self.top.winfo_x() + (event.x - self.x)
-        y = self.top.winfo_y() + (event.y - self.y)
-        self.top.geometry(f"+{x}+{y}")
+    def _on_parent_focus(self, event):
+        if self.top.winfo_exists():
+            self.top.after(10, self._bring_to_front)
+
+    def _on_parent_click(self, event):
+        if self.top.winfo_exists():
+            self.top.after(10, self._bring_to_front)
+
     def close_yes(self):
         self.result = True
         self.top.destroy()
@@ -573,6 +598,9 @@ class CustomMessageBox:
         self.result = False
         self.top.destroy()
 
+# =========================================================================
+# CLUSTER SELECTION DIALOG (ventana estándar)
+# =========================================================================
 class ClusterSelectionDialog:
     def __init__(self, parent, items, sf=1.0, title="Select Items"):
         self.parent = parent
@@ -583,25 +611,13 @@ class ClusterSelectionDialog:
         self.selected_clusters = set()
 
         self.top = tk.Toplevel(parent)
-        self.top.withdraw()
-        self.top.overrideredirect(True)
+        self.top.title(title)
         self.top.configure(bg=COLOR_BG)
-        
-        self.title_bar = tk.Frame(self.top, bg=COLOR_BTN_DARK, relief="raised", bd=0, height=int(32 * self.sf))
-        self.title_bar.pack(expand=0, fill="x")
-        self.title_bar.pack_propagate(False)
-        self.title_bar.bind("<ButtonPress-1>", self.start_move)
-        self.title_bar.bind("<B1-Motion>", self.do_move)
-        
-        self.lbl_title = tk.Label(self.title_bar, text=self.title, bg=COLOR_BTN_DARK, fg="white", font=FONT_TITLE)
-        self.lbl_title.place(relx=0.5, rely=0.5, anchor="center")
-        self.lbl_title.bind("<ButtonPress-1>", self.start_move)
-        self.lbl_title.bind("<B1-Motion>", self.do_move)
-        
-        self.close_btn = tk.Button(self.title_bar, text="✕", bg=COLOR_BTN_DARK, fg="white", bd=0, command=self.close_no, font=FONT_TITLE, width=4, activebackground="#A00000", activeforeground="white", cursor="hand2")
-        self.close_btn.pack(side="right", fill="y")
-        self.close_btn.bind("<Enter>", lambda e: self.close_btn.config(bg="#D00000"))
-        self.close_btn.bind("<Leave>", lambda e: self.close_btn.config(bg=COLOR_BTN_DARK))
+        self.top.transient(parent)
+        try:
+            self.top.iconbitmap(resource_path("argentina.ico"))
+        except:
+            pass
 
         f_search = tk.Frame(self.top, bg=COLOR_BG)
         f_search.pack(fill="x", padx=int(10 * self.sf), pady=int(10 * self.sf))
@@ -621,8 +637,6 @@ class ClusterSelectionDialog:
         self.listbox.pack(side="left", fill="both", expand=True)
         self.scrollbar.config(command=self.listbox.yview)
 
-        # SE REMOVIÓ EL BLOQUE F_SELECT_ALL QUE CONTENÍA LOS BOTONES "SELECT ALL" Y "DESELECT ALL"
-
         f_btn = tk.Frame(self.top, bg=COLOR_BG)
         f_btn.pack(side="bottom", pady=int(15 * self.sf))
         btn_ok = RoundedButton(f_btn, "Confirm", self.close_yes, width=150, height=40, sf=self.sf)
@@ -633,7 +647,7 @@ class ClusterSelectionDialog:
         self.update_list()
         
         self.top.update_idletasks()
-        req_w, req_h = int(450 * self.sf), int(500 * self.sf) # Ajustado ligeramente por el espacio liberado
+        req_w, req_h = int(450 * self.sf), int(500 * self.sf)
         pw, ph = parent.winfo_width(), parent.winfo_height()
         px, py = parent.winfo_rootx(), parent.winfo_rooty()
         
@@ -641,20 +655,35 @@ class ClusterSelectionDialog:
         y = py + (ph - req_h) // 2
         
         self.top.geometry(f"{req_w}x{req_h}+{x}+{y}")
-        self.top.attributes("-topmost", True)
+        self.top.resizable(False, False)
+        self.top.update_idletasks()
+        apply_rounded_corners(self.top, int(15 * self.sf))
         
-        # Anclar la aplicación de bordes al evento Configure
-        self.top.bind("<Configure>", self._on_configure)
+        set_toplevel_appwindow(self.top)
         
-        self.top.deiconify()
+        # Vincular eventos de la ventana padre
+        parent.bind("<FocusIn>", self._on_parent_focus, add="+")
+        parent.bind("<ButtonPress-1>", self._on_parent_click, add="+")
+        
         self.top.focus_force()
-        self.top.update()
         self.top.grab_set()
         parent.wait_window(self.top)
 
-    def _on_configure(self, event):
-        if str(event.widget) == str(self.top):
-            apply_rounded_corners(self.top, int(15 * self.sf))
+    def _bring_to_front(self):
+        if self.top.winfo_exists():
+            self.top.lift()
+            self.top.attributes('-topmost', True)
+            self.top.update_idletasks()
+            self.top.attributes('-topmost', False)
+            self.top.focus_force()
+
+    def _on_parent_focus(self, event):
+        if self.top.winfo_exists():
+            self.top.after(10, self._bring_to_front)
+
+    def _on_parent_click(self, event):
+        if self.top.winfo_exists():
+            self.top.after(10, self._bring_to_front)
 
     def sync_selection(self):
         if not hasattr(self, 'listbox') or not self.listbox.winfo_exists():
@@ -680,14 +709,6 @@ class ClusterSelectionDialog:
         for i in range(self.listbox.size()):
             if self.listbox.get(i) in self.selected_clusters:
                 self.listbox.select_set(i)
-
-    def start_move(self, event):
-        self.x, self.y = event.x, event.y
-        
-    def do_move(self, event):
-        x = self.top.winfo_x() + (event.x - self.x)
-        y = self.top.winfo_y() + (event.y - self.y)
-        self.top.geometry(f"+{x}+{y}")
 
     def close_yes(self):
         self.sync_selection()

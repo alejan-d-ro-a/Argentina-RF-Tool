@@ -11,22 +11,22 @@ import shutil
 
 from config_manager import ConfigManager
 from ui_components import (
-    COLOR_BG, COLOR_TEXT, COLOR_BTN_DARK, COLOR_BTN_CANCEL, COLOR_BTN_CANCEL_HOVER, 
-    FONT_NORMAL, FONT_TITLE, FONT_LARGE, FONT_DYNAMIC, RoundedButton, RoundedProgressBar, 
-    TextAnimWrapper, CustomMessageBox, apply_rounded_corners, 
+    COLOR_BG, COLOR_TEXT, COLOR_BTN_DARK, COLOR_BTN_CANCEL, COLOR_BTN_CANCEL_HOVER,
+    COLOR_BTN_HOVER,
+    FONT_NORMAL, FONT_TITLE, FONT_LARGE, FONT_DYNAMIC, RoundedButton, RoundedProgressBar,
+    TextAnimWrapper, CustomMessageBox, apply_rounded_corners,
     set_appwindow, resource_path, ClusterSelectionDialog, DatePickerDialog
 )
 from rf_data_engine import RFDataEngine
 import legacy_tools as legacy
 
-# IMPORTACIÓN DEL ACTUALIZADOR
 from auto_updater import check_for_updates
 
 class ProcessCancelledException(Exception): pass
 
 class RFProcessorApp:
     def __init__(self, root, scale_factor=1.0):
-        self.root = root 
+        self.root = root
         self.SF = scale_factor
         self.config = ConfigManager.load_config()
         self.engine = RFDataEngine()
@@ -42,6 +42,7 @@ class RFProcessorApp:
         self._slide_frame = None
         self.subtype_frame = None
         self.inputs_container = None
+        self._saved_geometry = None  # Para guardar geometría antes de minimizar
         
         self.selected_clusters = set()
         self.selected_obj_clusters = set()
@@ -70,6 +71,7 @@ class RFProcessorApp:
         self.dynamic_label = tk.Label(self.root, text="Select an option:", bg=COLOR_BG, fg=COLOR_TEXT, font=FONT_DYNAMIC, anchor="center")
         self.dynamic_label.pack(fill="x", padx=int(10 * self.SF), pady=(int(8 * self.SF), int(4 * self.SF)))
 
+        # Variables de configuración
         self.p_mvs = tk.StringVar(value=self.config.get('p_mvs', ''))
         self.p_tp = tk.StringVar(value=self.config.get('p_tp', ''))
         self.p_nics = tk.StringVar(value=self.config.get('p_nics', ''))
@@ -119,12 +121,71 @@ class RFProcessorApp:
         self.root.deiconify()
         self.root.after(50, lambda: apply_rounded_corners(self.root, int(20 * self.SF)))
 
+        # Vincular eventos para manejar minimización/restauración
+        self.root.bind("<Map>", self._on_map)
+        self.root.bind("<Unmap>", self._on_unmap)
+        self.root.bind("<Configure>", self._on_configure)
+
+    # =================================================================
+    # MANEJO DE MINIMIZACIÓN, RESTAURACIÓN Y GEOMETRÍA
+    # =================================================================
+    def _on_configure(self, event):
+        """Guardar geometría cuando la ventana cambie de tamaño/posición."""
+        if str(event.widget) == str(self.root):
+            # Solo guardar si la ventana no está minimizada (tamaño > 0)
+            if self.root.winfo_width() > 10 and self.root.winfo_height() > 10:
+                self._saved_geometry = self.root.geometry()
+
+    def _on_map(self, event):
+        """Cuando la ventana se restaura (después de minimizar)."""
+        if str(event.widget) == str(self.root):
+            # Asegurar que la ventana recupere su geometría correcta
+            if self._saved_geometry:
+                try:
+                    self.root.geometry(self._saved_geometry)
+                except:
+                    pass
+            
+            # Restaurar overrideredirect y estilos
+            self.root.overrideredirect(True)
+            set_appwindow(self.root)
+            self.root.after(50, lambda: apply_rounded_corners(self.root, int(20 * self.SF)))
+            self.root.lift()
+
+    def _on_unmap(self, event):
+        """Cuando la ventana se minimiza, guardamos geometría y liberamos overrideredirect."""
+        if str(event.widget) == str(self.root):
+            # Guardar geometría actual antes de minimizar (si la ventana es visible)
+            if self.root.winfo_width() > 10 and self.root.winfo_height() > 10:
+                self._saved_geometry = self.root.geometry()
+            self.root.overrideredirect(False)
+
+    # =================================================================
+    # BARRA DE TÍTULO PERSONALIZADA
+    # =================================================================
     def _build_title_bar(self):
         self.title_bar = tk.Frame(self.root, bg=COLOR_BTN_DARK, relief="raised", bd=0, height=int(32 * self.SF))
         self.title_bar.pack(expand=0, fill="x")
         self.title_bar.pack_propagate(False)
         self.title_bar.bind("<ButtonPress-1>", self.start_move)
         self.title_bar.bind("<B1-Motion>", self.do_move)
+
+        # Botón Feedback
+        self.btn_feedback = tk.Button(
+            self.title_bar,
+            text="Feedback",
+            command=self.open_feedback_email,
+            bg=COLOR_BTN_DARK,
+            fg="white",
+            relief="flat",
+            bd=0,
+            font=FONT_TITLE,
+            activebackground=COLOR_BTN_HOVER,
+            activeforeground="white",
+            cursor="hand2"
+        )
+        self.btn_feedback.pack(side="left", padx=5, pady=4)
+
         self.title_label = tk.Label(self.title_bar, text="Argentina RF Tool", bg=COLOR_BTN_DARK, fg="white", font=FONT_TITLE)
         self.title_label.place(relx=0.5, rely=0.5, anchor="center")
         
@@ -139,12 +200,24 @@ class RFProcessorApp:
         self.minimize_btn.bind("<Leave>", lambda e: self.minimize_btn.config(bg=COLOR_BTN_DARK))
         self.root.bind("<Map>", self.frame_mapped)
 
+    def open_feedback_email(self):
+        subject = "Feedback%20Argentina%20RF%20Tool"
+        body = "Hola,%0D%0A%0D%0AQuiero compartir mi feedback sobre la herramienta Argentina RF Tool.%0D%0A%0D%0A"
+        mailto_link = f"mailto:manuel.alejandro.ayala@huawei.com?cc=zhouyuting8@huawei.com;lex.zhaohuichao@huawei.com&subject={subject}&body={body}"
+        try:
+            webbrowser.open(mailto_link)
+        except Exception as e:
+            CustomMessageBox(self.root, "Error", f"No se pudo abrir el cliente de correo:\n{str(e)}", "error", self.SF)
+
     def start_move(self, event): self.x, self.y = event.x, event.y
     def do_move(self, event):
         x, y = self.root.winfo_x() + (event.x - self.x), self.root.winfo_y() + (event.y - self.y)
         self.root.geometry(f"+{x}+{y}")
         
     def minimize_window(self):
+        """Minimiza la ventana guardando geometría y quitando overrideredirect."""
+        if self.root.winfo_width() > 10 and self.root.winfo_height() > 10:
+            self._saved_geometry = self.root.geometry()
         self.root.overrideredirect(False)
         self.root.iconify()
         
@@ -155,6 +228,9 @@ class RFProcessorApp:
                 set_appwindow(self.root)
                 self.root.after(50, lambda: apply_rounded_corners(self.root, int(20 * self.SF)))
 
+    # =================================================================
+    # CONSTRUCCIÓN DE LA INTERFAZ PRINCIPAL
+    # =================================================================
     def build_ui(self):
         f_main = tk.Frame(self.root, bg=COLOR_BG)
         f_main.pack(fill="both", expand=True, padx=int(10 * self.SF), pady=int(5 * self.SF))
@@ -247,6 +323,9 @@ class RFProcessorApp:
                 print(f"Error opening browser: {e}")
         threading.Thread(target=_open, daemon=True).start()
 
+    # =================================================================
+    # ANIMACIONES DE TEXTO
+    # =================================================================
     def _typewriter_animate_all(self, targets, delay=25):
         if hasattr(self, '_title_animation_id') and self._title_animation_id:
             self.root.after_cancel(self._title_animation_id)
@@ -271,6 +350,9 @@ class RFProcessorApp:
         self.dynamic_label.config(text=old_text)
         self._typewriter_animate_all([(wrapper, new_text)], delay=20)
 
+    # =================================================================
+    # SELECCIÓN DE ARCHIVOS / CARPETAS
+    # =================================================================
     def select_file(self, var, var_name):
         path = filedialog.askopenfilename()
         if path:
@@ -311,6 +393,9 @@ class RFProcessorApp:
             except Exception as e:
                 CustomMessageBox(self.root, "Error", f"Failed to save template:\n{str(e)}", "error", self.SF)
 
+    # =================================================================
+    # INPUT ROW PARA CONFIGURACIÓN DE EXPORTACIÓN
+    # =================================================================
     def create_input_row(self, parent, text_lbl, var, var_name, is_folder, row_idx):
         lbl = tk.Label(parent, text=text_lbl, anchor="e", bg=COLOR_BG, fg=COLOR_TEXT, font=FONT_LARGE)
         lbl.grid(row=row_idx, column=0, sticky="e", padx=(0, 5), pady=5)
@@ -320,6 +405,9 @@ class RFProcessorApp:
         btn = RoundedButton(parent, text="📁", command=cmd, width=40, height=28, radius=8, sf=self.SF)
         btn.grid(row=row_idx, column=2, sticky="w", padx=2, pady=5)
 
+    # =================================================================
+    # MOSTRAR INPUTS SEGÚN EXPORTACIÓN SELECCIONADA (SLIDE)
+    # =================================================================
     def show_export_inputs(self, export_type):
         if self._slide_after_id:
             self.root.after_cancel(self._slide_after_id)
@@ -358,6 +446,9 @@ class RFProcessorApp:
         self._slide_frame.place(relx=0, rely=1.0, relwidth=1.0, relheight=1.0)
         self._slide_in(self._slide_frame)
 
+    # =================================================================
+    # SELECTORES DE SUBTIPO PARA CADA EXPORTACIÓN
+    # =================================================================
     def _create_ept_subtype_selector(self, parent):
         frame = tk.Frame(parent, bg=COLOR_BG)
         self.btn_ept_master = RoundedButton(frame, text="MASTER EPT", command=lambda: self.on_ept_subtype_select('master'), width=180, height=45, is_toggle=True, default_active=(self.ept_subtype == 'master'), sf=self.SF, auto_toggle=False)
@@ -394,6 +485,9 @@ class RFProcessorApp:
         self.btn_obj_site.pack(side="left", padx=5)
         return frame
 
+    # =================================================================
+    # MANEJO DE SELECCIÓN DE EXPORTACIÓN Y SUBTIPOS
+    # =================================================================
     def on_export_select(self, export_type):
         if self.active_export == export_type: return
         old_title = self.dynamic_label.cget("text")
@@ -434,6 +528,9 @@ class RFProcessorApp:
         self.object_subtype = subtype
         self.show_export_inputs('object_trees')
 
+    # =================================================================
+    # REEMPLAZAR INPUTS SEGÚN EXPORTACIÓN
+    # =================================================================
     def _replace_inputs(self, export_type):
         if self._slide_frame and self._slide_frame.winfo_exists():
             self._slide_frame.destroy(); self._slide_frame = None
@@ -606,6 +703,9 @@ class RFProcessorApp:
 
         self._slide_frame.update_idletasks()
 
+    # =================================================================
+    # CLUSTER FINDER (CARGA EN RAM Y BÚSQUEDA)
+    # =================================================================
     def load_ram(self):
         path = self.p_finder_batch.get()
         if not os.path.exists(path):
@@ -624,6 +724,9 @@ class RFProcessorApp:
         res = self.engine.search_cluster_fast(self.query_var.get())
         self.result_var.set(res)
 
+    # =================================================================
+    # ESTADO DE BOTONES Y PROCESOS
+    # =================================================================
     def check_ready_state(self):
         if self.is_running: return
         self.btn_run.enable()
@@ -639,6 +742,9 @@ class RFProcessorApp:
         self.loader.set_target(val)
         self.lbl_status.config(text=txt)
 
+    # =================================================================
+    # INICIO DE PROCESO (RUN THREAD)
+    # =================================================================
     def start_process(self):
         if self.active_export == 'it_final_report':
             if not self.date_elec.get().strip():
@@ -722,6 +828,9 @@ class RFProcessorApp:
         self.is_running = False
         self.check_ready_state()
 
+    # =================================================================
+    # HILO PRINCIPAL DE PROCESAMIENTO
+    # =================================================================
     def run_thread(self):
         try:
             out_p = self.p_out.get()
