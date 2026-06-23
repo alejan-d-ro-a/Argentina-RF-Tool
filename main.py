@@ -19,6 +19,9 @@ from ui_components import (
 from rf_data_engine import RFDataEngine
 import legacy_tools as legacy
 
+# IMPORTACIÓN DEL ACTUALIZADOR
+from auto_updater import check_for_updates
+
 class ProcessCancelledException(Exception): pass
 
 class RFProcessorApp:
@@ -802,6 +805,8 @@ class RFProcessorApp:
             gc.collect()
 
 if __name__ == "__main__":
+    check_for_updates()
+    
     root = tk.Tk()
     dpi = root.winfo_fpixels('1i')
     SF = dpi / 96.0

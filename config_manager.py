@@ -6,7 +6,8 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ConfigManager:
-    APP_NAME = "ArgentinaRFTool"
+    # SE AÑADIERON LOS ESPACIOS AQUÍ:
+    APP_NAME = "Argentina RF Tool"
     
     if sys.platform == "win32":
         BASE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), APP_NAME)
